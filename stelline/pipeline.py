@@ -110,12 +110,13 @@ class StellinePipeline:
                 memkoshi.storage.stage_memory(mem)
                 staged_count += 1
             
-            # Reindex search so next session has context
+            # Incrementally index new memories (not full reindex)
             if staged_count > 0:
                 try:
-                    memkoshi.search.reindex_all(memkoshi.storage)
+                    for mem in accepted:
+                        memkoshi.search.index_memory(mem)
                 except Exception as e:
-                    log.debug(f"[{sid}] Search reindex skipped: {e}")
+                    log.debug(f"[{sid}] Incremental index skipped: {e}")
 
             duration = time.time() - start_time
             log.info(f"[{sid}] ✅ Success — {staged_count} memories staged via {backend_used} in {duration:.0f}s")
