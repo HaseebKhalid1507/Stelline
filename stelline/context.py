@@ -13,20 +13,16 @@ class ContextLoader:
         """Load current project context from context files."""
         context_parts = []
         
-        # Load active projects
-        projects_file = Path(self.config.context.projects_active).expanduser()
-        if projects_file.exists():
-            context_parts.append(f"=== ACTIVE PROJECTS ===\n{projects_file.read_text()}")
-            
-        # Load recent sessions summary  
-        sessions_file = Path(self.config.context.sessions_recent).expanduser()
-        if sessions_file.exists():
-            context_parts.append(f"=== RECENT SESSIONS ===\n{sessions_file.read_text()}")
-            
-        # Load people context
-        people_file = Path(self.config.context.people).expanduser()
-        if people_file.exists():
-            context_parts.append(f"=== PEOPLE ===\n{people_file.read_text()}")
+        for label, path_str in [
+            ("ACTIVE PROJECTS", self.config.context.projects_active),
+            ("RECENT SESSIONS", self.config.context.sessions_recent),
+            ("PEOPLE", self.config.context.people),
+        ]:
+            if not path_str:  # Skip empty/unconfigured paths
+                continue
+            ctx_file = Path(path_str).expanduser()
+            if ctx_file.is_file():
+                context_parts.append(f"=== {label} ===\n{ctx_file.read_text()}")
         
         return "\n\n".join(context_parts)
     
