@@ -1,0 +1,16 @@
+[Unit]
+Description=Stelline Session Intelligence Harvest
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/home/haseeb/stelline/venv/bin/stelline harvest
+TimeoutSec=1800
+Environment=PATH=/home/haseeb/.local/bin:/home/haseeb/stelline/venv/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PYTHONPATH=/home/haseeb/memkoshi
+WorkingDirectory=/home/haseeb/stelline
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
