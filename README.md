@@ -168,6 +168,12 @@ pytest tests/ -q
 # 86 passed
 ```
 
+## Related Projects
+
+- **[Memkoshi](https://github.com/HaseebKhalid1507/memkoshi)** — Agent memory system. Stelline is its write path (`pip install memkoshi[stelline]`).
+- **[VelociRAG](https://github.com/HaseebKhalid1507/VelociRAG)** — 4-layer RAG search engine. Powers the read path.
+- **[Glyph](https://github.com/HaseebKhalid1507/Glyph)** — MCP security scanner and runtime protection.
+
 ## License
 
 MIT
