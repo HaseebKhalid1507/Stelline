@@ -162,8 +162,13 @@ class LLMClient:
             ]
         return SYSTEM_PROMPT
 
-    def _stream_response(self, prompt: str) -> str:
-        """Stream response from Anthropic API via SSE, return full text."""
+    def _stream_response(self, messages: list, system=None) -> str:
+        """Stream response from Anthropic API via SSE, return full text.
+        
+        Args:
+            messages: List of {role, content} dicts (multi-turn conversation)
+            system: System prompt override. If None, uses default.
+        """
         if not self._auth_token:
             self._auth_token = self._get_auth_token()
 
@@ -186,8 +191,8 @@ class LLMClient:
                 "model": self.model,
                 "max_tokens": 32768,
                 "stream": True,
-                "system": self._build_system(),
-                "messages": [{"role": "user", "content": prompt}],
+                "system": system or self._build_system(),
+                "messages": messages,
             },
             stream=True,
             timeout=300,
@@ -235,8 +240,8 @@ class LLMClient:
 
         return result.stdout.strip()
 
-    def extract_memories(self, prompt: str) -> List[Memory]:
-        """Get LLM response — try SSE first, fall back to pi -p on 429. Retry if both fail."""
+    def _call_llm(self, messages: list, system=None) -> str:
+        """Send messages to LLM — SSE first, pi -p fallback. Returns raw text."""
         last_error = None
 
         for attempt in range(1, self.max_retries + 1):
@@ -246,7 +251,7 @@ class LLMClient:
             if self.backend != "pi":
                 try:
                     log.info(f"Attempt {attempt}: trying SSE (direct API)")
-                    response = self._stream_response(prompt)
+                    response = self._stream_response(messages, system=system)
                     self.last_backend_used = "sse"
                     log.info("SSE succeeded")
                 except Exception as e:
@@ -256,11 +261,15 @@ class LLMClient:
                         log.error(f"SSE failed: {e}")
                         raise
 
-            # Fall back to pi -p
+            # Fall back to pi -p (single-turn only)
             if not response:
                 try:
                     log.info(f"Attempt {attempt}: trying pi -p")
-                    response = self._pi_response(prompt)
+                    # Flatten multi-turn to single prompt for pi
+                    flat_prompt = "\n\n".join(
+                        f"{m['role'].upper()}: {m['content']}" for m in messages
+                    )
+                    response = self._pi_response(flat_prompt)
                     self.last_backend_used = "pi"
                     log.info("pi -p succeeded")
                 except Exception as e:
@@ -278,6 +287,17 @@ class LLMClient:
 
         if not response:
             raise RuntimeError(f"All {self.max_retries} attempts failed. Last error: {last_error}")
+        return response
+
+    def extract_memories(self, prompt: str) -> tuple:
+        """Extract memories from prompt. Returns (memories, conversation_history)."""
+        messages = [{"role": "user", "content": prompt}]
+        response = self._call_llm(messages)
+
+        # Build conversation history for multi-turn
+        conversation = messages + [
+            {"role": "assistant", "content": response}
+        ]
 
         json_str = self._extract_json(response)
         if not json_str:
@@ -303,7 +323,20 @@ class LLMClient:
             if mem:
                 memories.append(mem)
 
-        return memories
+        return memories, conversation
+
+    def continue_conversation(self, conversation: list, follow_up: str) -> str:
+        """Send a follow-up message continuing an existing conversation.
+        
+        Args:
+            conversation: Message history from extract_memories.
+            follow_up: The follow-up user message.
+            
+        Returns:
+            Raw response text from the LLM.
+        """
+        messages = conversation + [{"role": "user", "content": follow_up}]
+        return self._call_llm(messages)
 
     def _salvage_partial_json(self, json_str: str) -> Optional[List[dict]]:
         """Try to salvage memories from truncated JSON by finding last complete object."""

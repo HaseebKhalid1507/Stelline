@@ -107,7 +107,7 @@ def test_sse_streams_and_parses_memories():
     with patch("stelline.llm.requests.post", return_value=mock_resp):
         client = LLMClient(backend="sse")
         client._auth_token = "test_token"
-        memories = client.extract_memories("test prompt")
+        memories, _ = client.extract_memories("test prompt")
 
     assert len(memories) == 1
     assert memories[0].title == "Built parser functionality"
@@ -180,7 +180,7 @@ def test_sse_falls_back_to_pi_on_429():
          patch("stelline.llm.subprocess.run", return_value=mock_pi_result):
         client = LLMClient(backend="sse")
         client._auth_token = "test_token"
-        memories = client.extract_memories("test")
+        memories, _ = client.extract_memories("test")
         assert len(memories) == 1
         assert memories[0].title == "Fallback worked"
 
@@ -223,7 +223,7 @@ def test_pi_backend_calls_subprocess():
 
     with patch("stelline.llm.subprocess.run", return_value=mock_result) as mock_run:
         client = LLMClient(backend="pi", model="claude-sonnet-4-6")
-        memories = client.extract_memories("test prompt")
+        memories, _ = client.extract_memories("test prompt")
 
         mock_run.assert_called_once()
         cmd = mock_run.call_args[0][0]

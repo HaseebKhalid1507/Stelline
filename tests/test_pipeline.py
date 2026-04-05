@@ -286,7 +286,7 @@ def test_calls_llm_and_stages_memories():
     
     with patch.object(pipeline, "_parse_session", return_value=transcript), \
          patch.object(pipeline, "_get_memkoshi_instance") as mock_memkoshi_factory, \
-         patch.object(pipeline, "_call_llm_and_parse", return_value=[mock_memory]) as mock_llm:
+         patch.object(pipeline, "_call_llm_and_parse", return_value=([mock_memory], [])) as mock_llm:
         
         mock_memkoshi = Mock()
         mock_memkoshi_factory.return_value = mock_memkoshi
@@ -411,7 +411,7 @@ def test_records_session_metrics():
     
     with patch.object(pipeline, "_parse_session", return_value=transcript), \
          patch.object(pipeline, "_get_memkoshi_instance") as mock_memkoshi_factory, \
-         patch.object(pipeline, "_call_llm_and_parse", return_value=[Mock(), Mock()]):
+         patch.object(pipeline, "_call_llm_and_parse", return_value=([Mock(), Mock()], [])):
         
         mock_memkoshi = Mock()
         mock_memkoshi_factory.return_value = mock_memkoshi

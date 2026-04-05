@@ -94,10 +94,11 @@ class StellinePipeline:
                 }
 
             # STEP 5: Call LLM → extract memories (chunked for large transcripts)
+            conversation = None
             if len(transcript) > self.CHUNK_THRESHOLD:
                 memories = self._process_chunked(transcript, existing_memories, project_context)
             else:
-                memories = self._call_llm_and_parse(prompt)
+                memories, conversation = self._call_llm_and_parse(prompt)
             backend_used = getattr(self.llm_client, 'last_backend_used', None) or "unknown"
             
             # STEP 6: Quality gate — filter before staging
@@ -118,8 +119,16 @@ class StellinePipeline:
                 except Exception as e:
                     log.debug(f"[{sid}] Incremental index skipped: {e}")
 
+            # STEP 7: Context updates (Pass 2 — multi-turn, uses Pass 1 memory)
+            context_updates = {}
+            if conversation and staged_count > 0:
+                try:
+                    context_updates = self._update_context_files(sid, conversation, memkoshi)
+                except Exception as e:
+                    log.warning(f"[{sid}] Context update failed (non-fatal): {e}")
+
             duration = time.time() - start_time
-            log.info(f"[{sid}] ✅ Success — {staged_count} memories staged via {backend_used} in {duration:.0f}s")
+            log.info(f"[{sid}] ✅ Success — {staged_count} memories staged, {len(context_updates)} context files updated via {backend_used} in {duration:.0f}s")
 
             self.tracker.record_session(
                 session_id=session_file.session_id,
@@ -341,6 +350,85 @@ class StellinePipeline:
         
         return accepted, rejected
 
-    def _call_llm_and_parse(self, prompt: str) -> List:
+    def _update_context_files(self, sid: str, conversation: list, memkoshi) -> dict:
+        """Pass 2: Update registered context files using multi-turn conversation."""
+        # Load registered context targets from Memkoshi DB
+        targets = self._get_context_targets(memkoshi)
+        if not targets:
+            return {}
+        
+        # Build the follow-up prompt with current file contents
+        parts = ["You just extracted memories from a session. Now update the following context files based on what you learned.\n"]
+        parts.append("For each file, I'll show you the current contents and instructions for how to update it.\n")
+        
+        for target in targets:
+            name = target['name']
+            path = Path(target['path']).expanduser()
+            instruction = target['instruction']
+            
+            current = ""
+            if path.is_file():
+                current = path.read_text()
+            
+            parts.append(f"=== {name} ===")
+            parts.append(f"PATH: {target['path']}")
+            parts.append(f"INSTRUCTIONS: {instruction}")
+            parts.append(f"CURRENT CONTENTS:\n{current}\n")
+        
+        parts.append('Return JSON: {"updates": {"name": "full updated file contents", ...}}')
+        parts.append('Only include files that need changes. If nothing changed, return {"updates": {}}')
+        
+        follow_up = "\n".join(parts)
+        
+        log.info(f"[{sid}] Pass 2: updating {len(targets)} context files")
+        response = self.llm_client.continue_conversation(conversation, follow_up)
+        
+        # Parse and write updates
+        import json as json_mod
+        json_str = self.llm_client._extract_json(response)
+        if not json_str:
+            log.warning(f"[{sid}] Pass 2: no JSON in response")
+            return {}
+        
+        try:
+            parsed = json_mod.loads(json_str)
+            updates = parsed.get('updates', {})
+        except json_mod.JSONDecodeError:
+            log.warning(f"[{sid}] Pass 2: invalid JSON")
+            return {}
+        
+        written = {}
+        for target in targets:
+            name = target['name']
+            if name in updates and updates[name]:
+                path = Path(target['path']).expanduser()
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(updates[name])
+                written[name] = str(path)
+                log.info(f"[{sid}] Updated context: {name} ({path})")
+        
+        return written
+    
+    def _get_context_targets(self, memkoshi) -> list:
+        """Read registered context targets from Memkoshi's stelline_contexts table."""
+        import sqlite3
+        db_path = str(Path(memkoshi.storage_path) / 'memkoshi.db')
+        try:
+            db = sqlite3.connect(db_path)
+            db.execute('''CREATE TABLE IF NOT EXISTS stelline_contexts (
+                name TEXT PRIMARY KEY,
+                path TEXT NOT NULL,
+                instruction TEXT NOT NULL,
+                enabled INTEGER DEFAULT 1
+            )''')
+            db.commit()
+            cursor = db.execute('SELECT name, path, instruction FROM stelline_contexts WHERE enabled = 1')
+            targets = [{'name': r[0], 'path': r[1], 'instruction': r[2]} for r in cursor.fetchall()]
+            db.close()
+            return targets
+        except Exception:
+            return []
+
+    def _call_llm_and_parse(self, prompt: str) -> tuple:
         """Call LLM with prompt and parse response into Memory objects."""
         return self.llm_client.extract_memories(prompt)
